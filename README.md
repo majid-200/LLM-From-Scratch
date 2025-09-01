@@ -4,7 +4,7 @@ This repository documents my journey into building Large Language Models (LLMs) 
 
 The repository is divided into two main sections:
 1.  **A GPT-like Model**: We build a complete, character-level Generative Pre-trained Transformer from the ground up, starting with a simple bigram model and progressively adding complexity.
-2.  **Llama 3 Architectural Deep Dive**: We explore the key innovations in a state-of-the-art model, Llama 3, by implementing its advanced attention, feed-forward, and tokenization mechanisms in focused notebooks.
+2.  **Llama 3 Architectural Deep Dive**: We explore the key innovations in Llama 3, by implementing its advanced attention, feed-forward, and tokenization mechanisms in focused notebooks.
 
 ## Repository Structure
 
