@@ -93,8 +93,8 @@ A fundamental aspect of modern LLMs is how they process text. While our simple G
 ### Setup and Running
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/your-username/your-repo-name.git
-    cd your-repo-name
+    git clone git@github.com:majid-200/Language_Models_from_scratch.git
+    cd Language_Models_from_scratch
     ```
 
 2.  **Install dependencies:**
@@ -125,4 +125,8 @@ A fundamental aspect of modern LLMs is how they process text. While our simple G
     ```
 
 ## Acknowledgements
-This project is heavily based on the excellent, educational content from online tutorials that break down these complex topics into manageable pieces. The implementations here are my personal re-creations aimed at solidifying my own understanding of these powerful models.
+This project is heavily based on the excellent, educational content from online tutorials that break down these complex topics into manageable pieces.
+
+Let's build GPT: from scratch, in code, spelled out. by Andrej Karpathy (https://youtu.be/kCc8FmEb1nY?feature=shared)
+Code Llama 4 From Scratch - Easy Math Explanations & Python Code by Vuk Rosić (https://youtu.be/wcDV3l4CD14?feature=shared)
+
