@@ -127,6 +127,7 @@ A fundamental aspect of modern LLMs is how they process text. While our simple G
 ## Acknowledgements
 This project is heavily based on the excellent, educational content from online tutorials that break down these complex topics into manageable pieces.
 
-Let's build GPT: from scratch, in code, spelled out. by Andrej Karpathy (https://youtu.be/kCc8FmEb1nY?feature=shared) \n
+Let's build GPT: from scratch, in code, spelled out. by Andrej Karpathy (https://youtu.be/kCc8FmEb1nY?feature=shared)
+
 Code Llama 4 From Scratch - Easy Math Explanations & Python Code by Vuk Rosić (https://youtu.be/wcDV3l4CD14?feature=shared)
 
