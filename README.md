@@ -1,5 +1,3 @@
-# Language_Models_from_scratch
-
 # Building LLMs from Scratch: A Hands-On Guide to GPT and Llama 3 Architectures
 
 This repository documents my journey into building Large Language Models (LLMs) from scratch, following two separate, in-depth tutorials. The goal is to demystify the core components of modern transformer architectures by implementing them step-by-step in PyTorch.
