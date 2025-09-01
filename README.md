@@ -4,7 +4,7 @@ This repository documents my journey into building Large Language Models (LLMs) 
 
 The repository is divided into two main sections:
 1.  **A GPT-like Model**: We build a complete, character-level Generative Pre-trained Transformer from the ground up, starting with a simple bigram model and progressively adding complexity.
-2.  **Llama 3 Architectural Deep Dive**: We explore the key innovations in a state-of-the-art model, Llama 3, by implementing its advanced attention and feed-forward mechanisms in focused notebooks.
+2.  **Llama 3 Architectural Deep Dive**: We explore the key innovations in a state-of-the-art model, Llama 3, by implementing its advanced attention, feed-forward, and tokenization mechanisms in focused notebooks.
 
 ## Repository Structure
 
@@ -14,13 +14,13 @@ The repository is divided into two main sections:
 │   ├── bigram.py               # A simple baseline language model.
 │   ├── GPT.py                  # Full implementation of a GPT-like transformer.
 │   ├── GPT-Scratch.ipynb       # A detailed, step-by-step notebook for building the GPT model.
-│   ├── BPE_Scratch.py          # Script for Byte-Pair Encoding tokenizer.
-│   ├── BPE_Scratch.ipynb       # Notebook explaining and implementing BPE from scratch.
 │   └── TinyShakespear.txt      # The training dataset.
 │
 ├── llama3/
 │   ├── Llama_3_Attention.ipynb # Notebook implementing Llama 3's advanced attention mechanism.
-│   └── Llama_3_feed_forward.ipynb # Notebook implementing Llama 3's SwiGLU feed-forward network.
+│   ├── Llama_3_feed_forward.ipynb # Notebook implementing Llama 3's SwiGLU feed-forward network.
+│   ├── BPE_Scratch.py          # Script for Byte-Pair Encoding tokenizer.
+│   └── BPE_Scratch.ipynb       # Notebook explaining and implementing BPE from scratch.
 │
 └── README.md                   # You are here!
 ```
@@ -29,10 +29,10 @@ The repository is divided into two main sections:
 
 ## Part 1: Building a GPT-like Model
 
-This section focuses on constructing a decoder-only transformer model, similar in spirit to OpenAI's GPT-2, trained on the works of Shakespeare.
+This section focuses on constructing a decoder-only transformer model, similar in spirit to OpenAI's GPT-2, trained on the works of Shakespeare. It uses a simple **character-level tokenization** to demonstrate the core mechanics of the transformer architecture without the added complexity of a subword tokenizer.
 
 ### Key Concepts Covered
--   Tokenization (Character-level and Subword-level)
+-   Character-level Tokenization
 -   Bigram Language Models
 -   Transformer Architecture
 -   Self-Attention Mechanism
@@ -56,9 +56,6 @@ The model built here includes all the fundamental components of a transformer bl
 -   **Feed-Forward Network**: A simple MLP applied to each token position independently, adding computational depth.
 -   **Residual Connections & Layer Normalization**: Critical for stabilizing training in deep networks by preventing vanishing/exploding gradients.
 
-#### 🧩 `BPE_Scratch.ipynb` & `BPE_Scratch.py`
-While our GPT model uses simple character-level tokenization, modern LLMs use more sophisticated methods. This notebook explores **Byte-Pair Encoding (BPE)**, a subword tokenization algorithm. It starts with a vocabulary of individual characters and iteratively merges the most frequent adjacent pairs of tokens. This allows the model to handle rare words and create a more efficient, semantically meaningful vocabulary. The notebook visualizes this merging process step-by-step.
-
 ---
 
 ## Part 2: Deconstructing Llama 3's Architecture
@@ -66,24 +63,23 @@ While our GPT model uses simple character-level tokenization, modern LLMs use mo
 This section moves beyond the foundational GPT architecture to explore the specific, high-performance components used in Meta's Llama 3 model. These notebooks isolate and implement these key innovations.
 
 ### Key Concepts Covered
+-   **Byte-Pair Encoding (BPE)**: A modern subword tokenization strategy.
 -   **RMSNorm**: A simpler and more efficient alternative to LayerNorm.
 -   **SwiGLU (Gated Linear Unit)**: An advanced feed-forward network that often provides better performance than standard ReLU-based networks.
--   **Rotary Positional Embeddings (RoPE)**: A sophisticated method for encoding positional information by rotating the query and key vectors, allowing the model to better understand relative positions.
--   **Grouped-Query Attention (GQA)**: An optimization of the attention mechanism that groups query heads to share a single key and value head, offering a balance between the performance of Multi-Head Attention and the efficiency of Multi-Query Attention.
--   **QK Normalization**: An additional normalization step applied to query and key vectors before the attention calculation to improve training stability.
+-   **Rotary Positional Embeddings (RoPE)**: A sophisticated method for encoding positional information by rotating the query and key vectors.
+-   **Grouped-Query Attention (GQA)**: An optimized attention mechanism balancing performance and efficiency.
+-   **QK Normalization**: An additional normalization step to improve training stability.
 
 ### File Breakdown
 
 #### 🧠 `Llama_3_Attention.ipynb`
-This notebook is a deep dive into the heart of the Llama 3 transformer block: its attention mechanism. It meticulously reconstructs the entire attention forward pass, explaining and implementing:
-1.  **Q, K, V Projections**: Standard linear transformations of the input.
-2.  **Applying RoPE**: Integrating relative positional information directly into the queries and keys.
-3.  **QK Norm**: Applying L2 normalization to the Q and K vectors.
-4.  **Grouped-Query Attention (GQA)**: Efficiently handling keys and values by repeating them to match the number of query heads.
-5.  **Scaled Dot-Product Attention**: The final calculation of attention scores and output.
+This notebook is a deep dive into the heart of the Llama 3 transformer block: its attention mechanism. It meticulously reconstructs the entire attention forward pass, explaining and implementing RoPE, QK Norm, and Grouped-Query Attention (GQA).
 
 #### 🚀 `Llama_3_feed_forward.ipynb`
-This notebook focuses on the other major component of the Llama 3 transformer block: the feed-forward network. It implements the **SwiGLU** variant, which involves three linear projections (`gate`, `up`, and `down`) instead of the standard two. It also demonstrates the use of **RMSNorm** for pre-normalization, a key feature of the Llama architecture that contributes to its efficiency and stability.
+This notebook focuses on the other major component of the Llama 3 transformer block: the feed-forward network. It implements the **SwiGLU** variant and demonstrates the use of **RMSNorm** for pre-normalization, a key feature of the Llama architecture.
+
+#### 🧩 `BPE_Scratch.ipynb` & `BPE_Scratch.py`
+A fundamental aspect of modern LLMs is how they process text. While our simple GPT model uses character-level tokens, advanced models like Llama 3 rely on **subword tokenization**. This notebook and script implement **Byte-Pair Encoding (BPE)** from scratch, a popular subword tokenization algorithm. It starts with a base vocabulary of individual characters and iteratively merges the most frequent adjacent pairs, creating a more efficient and semantically rich vocabulary. This is a crucial concept for understanding how LLMs handle vast and varied language data.
 
 ---
 
@@ -110,7 +106,7 @@ This notebook focuses on the other major component of the Llama 3 transformer bl
     ```
 
 3.  **Download the dataset:**
-    The `TinyShakespear.txt` dataset is used for the GPT model. If not already present, you can download it.
+    The `TinyShakespear.txt` dataset is used for the GPT model.
     ```bash
     wget https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt -O gpt/TinyShakespear.txt
     ```
