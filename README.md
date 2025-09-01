@@ -93,8 +93,8 @@ A fundamental aspect of modern LLMs is how they process text. While our simple G
 ### Setup and Running
 1.  **Clone the repository:**
     ```bash
-    git clone git@github.com:majid-200/Language_Models_from_scratch.git
-    cd Language_Models_from_scratch
+    git clone git@github.com:majid-200/LLM-From-Scratch.git
+    cd LLM-From-Scratch
     ```
 
 2.  **Install dependencies:**
