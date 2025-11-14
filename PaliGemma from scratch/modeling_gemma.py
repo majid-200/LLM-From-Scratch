@@ -45,6 +45,114 @@ Key Innovation: Merges visual and textual information into a unified sequence
 that a language model can process to generate text about images.
 """
 
+class KVCache():
+    """
+    Key-Value Cache for efficient autoregressive generation.
+    
+    Problem it solves:
+    Without cache: When generating token N, recompute attention for tokens 1...N-1
+    With cache: Store keys/values from previous tokens, only compute new token
+    
+    Visual representation of generation with KV Cache:
+    
+    Step 1 (Prefill - process prompt):
+    ┌─────────────────────────────────────────────────────────┐
+    │ Input: "The cat is"  [tokens 1,2,3]                     │
+    │ Compute K,V for all tokens → Store in cache             │
+    │ Cache: [K1,K2,K3], [V1,V2,V3]                           │
+    └─────────────────────────────────────────────────────────┘
+    
+    Step 2 (Generate token 4):
+    ┌─────────────────────────────────────────────────────────┐
+    │ Input: "sitting"  [token 4]                             │
+    │ Compute K4,V4 only                                      │
+    │ Retrieve cached [K1,K2,K3], [V1,V2,V3]                  │
+    │ Attention: Q4 attends to [K1,K2,K3,K4]                  │
+    │ Update cache: [K1,K2,K3,K4], [V1,V2,V3,V4]              │
+    └─────────────────────────────────────────────────────────┘
+    
+    Step 3 (Generate token 5):
+    ┌─────────────────────────────────────────────────────────┐
+    │ Input: "on"  [token 5]                                   │
+    │ Compute K5,V5 only                                       │
+    │ Retrieve cached [K1,K2,K3,K4], [V1,V2,V3,V4]           │
+    │ Attention: Q5 attends to [K1,K2,K3,K4,K5]              │
+    │ Update cache: [K1,K2,K3,K4,K5], [V1,V2,V3,V4,V5]      │
+    └─────────────────────────────────────────────────────────┘
+    
+    Memory savings: O(n²) → O(n) for generation
+    Speed up: ~10-100x faster for long sequences
+    """
+
+    def __init__(self) -> None:
+        # List of tensors, one per layer
+        # Each tensor shape: [Batch_Size, Num_Heads_KV, Seq_Len, Head_Dim]
+        self.key_cache: List[torch.Tensor] = []
+        self.value_cache: List[torch.Tensor] = []
+    
+    def num_items(self) -> int:
+        """
+        Returns the sequence length currently stored in the cache.
+        
+        Returns:
+            Number of tokens cached (0 if cache is empty)
+        """
+        if len(self.key_cache) == 0:
+            return 0
+        else:
+            # The shape of the key_cache is [Batch_Size, Num_Heads_KV, Seq_Len, Head_Dim]
+            # We return the sequence length dimension
+            return self.key_cache[0].shape[-2]
+
+    def update(
+        self,
+        key_states: torch.Tensor,
+        value_states: torch.Tensor,
+        layer_idx: int,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Update the cache for a specific layer by appending new key/value states.
+        
+        Visual example for layer 0:
+        Before update:
+        ┌──────────────────────────┐
+        │ key_cache[0]:            │
+        │ [B, H, 10, D]            │  10 tokens cached
+        └──────────────────────────┘
+        
+        New keys to add:
+        ┌──────────────────────────┐
+        │ key_states:              │
+        │ [B, H, 1, D]             │  1 new token
+        └──────────────────────────┘
+        
+        After update:
+        ┌──────────────────────────┐
+        │ key_cache[0]:            │
+        │ [B, H, 11, D]            │  11 tokens total
+        └──────────────────────────┘
+        
+        Args:
+            key_states: New keys to add [B, Num_Heads_KV, New_Seq_Len, Head_Dim]
+            value_states: New values to add [B, Num_Heads_KV, New_Seq_Len, Head_Dim]
+            layer_idx: Which transformer layer this cache is for
+            
+        Returns:
+            Complete key and value tensors including cached + new states
+        """
+        if len(self.key_cache) <= layer_idx:
+            # First time seeing this layer - initialize its cache
+            self.key_cache.append(key_states)
+            self.value_cache.append(value_states)
+        else:
+            # Concatenate new keys/values with existing cache along sequence dimension
+            # [B, H, old_seq, D] + [B, H, new_seq, D] → [B, H, old_seq+new_seq, D]
+            self.key_cache[layer_idx] = torch.cat([self.key_cache[layer_idx], key_states], dim=-2)
+            self.value_cache[layer_idx] = torch.cat([self.value_cache[layer_idx], value_states], dim=-2)
+
+        # Return the complete concatenated tensors
+        return self.key_cache[layer_idx], self.value_cache[layer_idx]
+
 class GemmaConfig():
     """
     Configuration class for the Gemma language model.
@@ -206,6 +314,195 @@ class GemmaRMSNorm(nn.Module):
         # Convert back to original dtype
         return output.type_as(x)
     
+class GemmaRotaryEmbedding(nn.Module):
+    """
+    Rotary Position Embeddings (RoPE) - Encodes position information.
+    
+    Traditional position encoding: Add position vector to embeddings
+    RoPE: Rotate the embedding vectors based on their position
+    
+    Visual intuition (in 2D, actual is higher dimensional):
+    ┌────────────────────────────────────────────────┐
+    │  Position 0: No rotation (0°)                  │
+    │      ↑                                         │
+    │      │  (original vector)                      │
+    │      └──>                                      │
+    │                                                │
+    │  Position 1: Small rotation (θ)                │
+    │      ↗                                         │
+    │     /  (rotated by angle θ)                    │
+    │    └──>                                        │
+    │                                                │
+    │  Position 2: Larger rotation (2θ)              │
+    │      →                                         │
+    │      (rotated by angle 2θ)                     │
+    │    └──>                                        │
+    │                                                │
+    │  Position n: Even larger rotation (nθ)         │
+    │      ↘                                         │
+    │       \  (rotated by angle nθ)                 │
+    │        └──>                                    │
+    └────────────────────────────────────────────────┘
+    
+    Benefits:
+    - Relative position info: Distance between positions is encoded in rotation
+    - Extrapolation: Can handle sequences longer than training
+    - No learned parameters: Position encoding is deterministic
+    
+    Formula: For position m and dimension i:
+    - θᵢ = base^(-2i/dim)  (frequency for dimension pair i)
+    - Rotate embedding by angle m*θᵢ
+    """
+    
+    def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None):
+        """
+        Args:
+            dim: Dimension of each attention head (head_dim)
+            max_position_embeddings: Maximum sequence length to support
+            base: Base for computing rotation frequencies (typically 10000)
+        """
+        super().__init__()
+
+        self.dim = dim  # Head dimension (e.g., 256)
+        self.max_position_embeddings = max_position_embeddings
+        self.base = base
+
+        # Calculate theta according to the formula: θᵢ = base^(-2i/dim)
+        # where i = 0, 1, 2, ..., dim // 2
+        # Example for dim=4, base=10000:
+        # i=0: 10000^(0/4) = 1.0
+        # i=1: 10000^(-2/4) = 10000^(-0.5) = 0.01
+        inv_freq = 1.0 / (self.base ** (torch.arange(0, self.dim, 2, dtype=torch.int64).float() / self.dim))
+        # Register as buffer (not a parameter, but part of model state)
+        self.register_buffer("inv_freq", tensor=inv_freq, persistent=False)
+
+    @torch.no_grad()
+    def forward(self, x, position_ids, seq_len=None):
+        """
+        Compute cos and sin values for rotary position embeddings.
+        
+        Process:
+        1. For each position m, compute m * θᵢ (angle for each dimension pair)
+        2. Compute cos(m*θᵢ) and sin(m*θᵢ)
+        3. These will be used to rotate query and key vectors
+        
+        Args:
+            x: Input tensor [Batch_Size, Num_Heads, Seq_Len, Head_Dim]
+            position_ids: Position indices [Batch_Size, Seq_Len]
+            seq_len: Sequence length (unused, kept for compatibility)
+            
+        Returns:
+            cos: Cosine values [Batch_Size, Seq_Len, Head_Dim]
+            sin: Sine values [Batch_Size, Seq_Len, Head_Dim]
+        """
+        # Ensure inv_freq is on the same device as input
+        self.inv_freq.to(x.device)
+        
+        # Expand inv_freq for batch processing
+        # [Head_Dim // 2] → [Batch_Size, Head_Dim // 2, 1]
+        inv_freq_expanded = self.inv_freq[None, :, None].float().expand(position_ids.shape[0], -1, 1)
+        
+        # Expand position_ids
+        # [Batch_Size, Seq_Len] → [Batch_Size, 1, Seq_Len]
+        position_ids_expanded = position_ids[:, None, :].float()
+        
+        # Handle device compatibility (MPS has limited autocast support)
+        device_type = x.device.type
+        device_type = device_type if isinstance(device_type, str) and device_type != "mps" else "cpu"
+        
+        with torch.autocast(device_type=device_type, enabled=False):
+            # Multiply θᵢ by position m to get angles
+            # [B, Head_Dim//2, 1] @ [B, 1, Seq_Len] → [B, Head_Dim//2, Seq_Len]
+            # Then transpose: [B, Seq_Len, Head_Dim//2]
+            freqs = (inv_freq_expanded.float() @ position_ids_expanded.float()).transpose(1, 2)
+            
+            # Duplicate frequencies for both elements of each rotation pair
+            # [B, Seq_Len, Head_Dim//2] → [B, Seq_Len, Head_Dim]
+            emb = torch.cat((freqs, freqs), dim=-1)
+            
+            # Compute cos and sin for rotation
+            # Both have shape [B, Seq_Len, Head_Dim]
+            cos = emb.cos()
+            sin = emb.sin()
+            
+        return cos.to(dtype=x.dtype), sin.to(dtype=x.dtype)
+
+
+def rotate_half(x):
+    """
+    Helper function for applying rotary embeddings.
+    
+    Rearranges elements for rotation formula:
+    [x1, x2, x3, x4, ...] → [-x2, x1, -x4, x3, ...]
+    
+    Visual for 4D vector [a, b, c, d]:
+    ┌─────────────────┐         ┌─────────────────┐
+    │ Original:       │         │ Rotated:        │
+    │ [a, b, c, d]    │  ────>  │ [-b, a, -d, c]  │
+    └─────────────────┘         └─────────────────┘
+    
+    This rearrangement allows vectorized rotation:
+    Instead of explicit 2D rotation matrices, we use:
+    rotated = x * cos + rotate_half(x) * sin
+    
+    Args:
+        x: Input tensor [..., Head_Dim]
+        
+    Returns:
+        Rearranged tensor [..., Head_Dim] with elements swapped and negated
+    """
+    # Split into two halves
+    x1 = x[..., : x.shape[-1] // 2]  # First half
+    x2 = x[..., x.shape[-1] // 2 :]  # Second half
+    
+    # Concatenate in rearranged order: [-x2, x1]
+    return torch.cat((-x2, x1), dim=-1)
+
+
+def apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=1):
+    """
+    Apply rotary position embeddings to query and key tensors.
+    
+    Formula (from RoFormer paper):
+    q' = q * cos(mθ) + rotate_half(q) * sin(mθ)
+    k' = k * cos(mθ) + rotate_half(k) * sin(mθ)
+    
+    This rotates each query/key vector by an angle proportional to its position.
+    
+    Visual for one position:
+    ┌─────────────────────────────────────────┐
+    │  Original Q: [q1, q2, q3, q4]           │
+    │                                         │
+    │  Rotated Q:                             │
+    │    [q1, q2, q3, q4] * cos(mθ)           │
+    │  + [-q2, q1, -q4, q3] * sin(mθ)         │
+    │                                         │
+    │  Result: Vector rotated in 2D subspaces │
+    └─────────────────────────────────────────┘
+    
+    Args:
+        q: Query tensor [Batch_Size, Num_Heads_Q, Seq_Len, Head_Dim]
+        k: Key tensor [Batch_Size, Num_Heads_KV, Seq_Len, Head_Dim]
+        cos: Cosine values [Batch_Size, Seq_Len, Head_Dim]
+        sin: Sine values [Batch_Size, Seq_Len, Head_Dim]
+        unsqueeze_dim: Dimension to unsqueeze for broadcasting (default: 1 for heads)
+        
+    Returns:
+        q_embed: Rotated queries [Batch_Size, Num_Heads_Q, Seq_Len, Head_Dim]
+        k_embed: Rotated keys [Batch_Size, Num_Heads_KV, Seq_Len, Head_Dim]
+    """
+    # Add head dimension for broadcasting
+    # [B, Seq_Len, Head_Dim] → [B, 1, Seq_Len, Head_Dim]
+    cos = cos.unsqueeze(unsqueeze_dim)
+    sin = sin.unsqueeze(unsqueeze_dim)
+    
+    # Apply rotation formula
+    # Element-wise: (q * cos) + (rotated_q * sin)
+    q_embed = (q * cos) + (rotate_half(q) * sin)
+    k_embed = (k * cos) + (rotate_half(k) * sin)
+    
+    return q_embed, k_embed
+    
 class GemmaMLP(nn.Module):
     """
     Gated MLP (Multi-Layer Perceptron) used in Gemma.
@@ -284,7 +581,55 @@ class GemmaMLP(nn.Module):
         # z = self.down_proj(z)  # [B, Seq, Intermediate] → [B, Seq, Hidden]
         
         return self.down_proj(nn.functional.gelu(self.gate_proj(x), approximate="tanh") * self.up_proj(x))
+
+def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """
+    Repeat key/value heads to match number of query heads.
     
+    Used in Grouped Query Attention (GQA) - a memory optimization technique.
+    
+    Standard Multi-Head Attention:
+    ┌────────────────────────────────────────┐
+    │  8 Query heads                         │
+    │  8 Key heads    } All separate         │
+    │  8 Value heads  }                      │
+    └────────────────────────────────────────┘
+    
+    Grouped Query Attention (GQA):
+    ┌────────────────────────────────────────┐
+    │  8 Query heads                         │
+    │  1 Key head     } Shared across queries│
+    │  1 Value head   }                      │
+    │                                        │
+    │  Repeat K,V 8 times to match Q heads   │
+    └────────────────────────────────────────┘
+    
+    Benefits:
+    - Reduces memory by 8x for K,V (in this example)
+    - Minimal performance loss
+    - Much faster KV cache updates during generation
+    
+    Args:
+        hidden_states: Keys or Values [B, Num_KV_Heads, Seq_Len, Head_Dim]
+        n_rep: Number of times to repeat (num_q_heads // num_kv_heads)
+        
+    Returns:
+        Repeated tensor [B, Num_KV_Heads * n_rep, Seq_Len, Head_Dim]
+    """
+    batch, num_key_value_heads, slen, head_dim = hidden_states.shape
+    
+    if n_rep == 1:
+        # No repetition needed (standard multi-head attention)
+        return hidden_states
+    
+    # Add a new dimension and expand to repeat n_rep times
+    # [B, KV_Heads, Seq, Dim] → [B, KV_Heads, 1, Seq, Dim] → [B, KV_Heads, n_rep, Seq, Dim]
+    hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
+    
+    # Reshape to merge the repetition dimension with KV heads
+    # [B, KV_Heads, n_rep, Seq, Dim] → [B, KV_Heads * n_rep, Seq, Dim]
+    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
+
 class GemmaAttention(nn.Module):
     """
     Multi-Head Attention with Grouped Query Attention (GQA) and Rotary Position Embeddings.
